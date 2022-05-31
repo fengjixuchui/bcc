@@ -495,7 +495,7 @@ class BPF(object):
 
         return fns
 
-    def load_func(self, func_name, prog_type, device = None):
+    def load_func(self, func_name, prog_type, device = None, attach_type = -1):
         func_name = _assert_is_bytes(func_name)
         if func_name in self.funcs:
             return self.funcs[func_name]
@@ -511,7 +511,7 @@ class BPF(object):
                 lib.bpf_function_size(self.module, func_name),
                 lib.bpf_module_license(self.module),
                 lib.bpf_module_kern_version(self.module),
-                log_level, None, 0, device)
+                log_level, None, 0, device, attach_type)
 
         if fd < 0:
             atexit.register(self.donothing)
@@ -957,7 +957,8 @@ class BPF(object):
             ct.cast(None, ct.POINTER(bcc_symbol_option)),
             ct.byref(sym),
         ) < 0:
-            raise Exception("could not determine address of symbol %s" % symname)
+            raise Exception("could not determine address of symbol %s in %s"
+                            % (symname.decode(), module.decode()))
         new_addr = sym.offset + sym_off
         module_path = ct.cast(sym.module, ct.c_char_p).value
         lib.bcc_procutils_free(sym.module)

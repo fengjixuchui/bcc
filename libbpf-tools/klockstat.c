@@ -10,13 +10,13 @@
  *     when '-s' > 1 (otherwise it's cluttered).
  * - does not reset stats each interval by default. Can request with -R.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <argp.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -54,6 +54,7 @@ static struct prog_env {
 	unsigned int iterations;
 	bool reset;
 	bool timestamp;
+	bool verbose;
 } env = {
 	.nr_locks = 99999999,
 	.nr_stack_entries = 1,
@@ -63,14 +64,14 @@ static struct prog_env {
 	.iterations = 99999999,
 };
 
-const char *argp_program_version = "klockstat 0.1";
+const char *argp_program_version = "klockstat 0.2";
 const char *argp_program_bug_address =
 	"https://github.com/iovisor/bcc/tree/master/libbpf-tools";
 static const char args_doc[] = "FUNCTION";
 static const char program_doc[] =
-"Trace mutex lock acquisition and hold times, in nsec\n"
+"Trace mutex/sem lock acquisition and hold times, in nsec\n"
 "\n"
-"Usage: klockstat [-hRT] [-p PID] [-t TID] [-c FUNC] [-L LOCK] [-n NR_LOCKS]\n"
+"Usage: klockstat [-hRTv] [-p PID] [-t TID] [-c FUNC] [-L LOCK] [-n NR_LOCKS]\n"
 "                 [-s NR_STACKS] [-S SORT] [-d DURATION] [-i INTERVAL]\n"
 "\v"
 "Examples:\n"
@@ -104,6 +105,7 @@ static const struct argp_option opts[] = {
 	{ "interval", 'i', "SECONDS", 0, "Print interval" },
 	{ "reset", 'R', NULL, 0, "Reset stats each interval" },
 	{ "timestamp", 'T', NULL, 0, "Print timestamp" },
+	{ "verbose", 'v', NULL, 0, "Verbose debug output" },
 
 	{ NULL, 'h', NULL, OPTION_HIDDEN, "Show the full help" },
 	{},
@@ -229,6 +231,9 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 		break;
 	case 'h':
 		argp_state_help(state, stderr, ARGP_HELP_STD_HELP);
+		break;
+	case 'v':
+		env->verbose = true;
 		break;
 	case ARGP_KEY_END:
 		if (env->duration) {
@@ -471,6 +476,13 @@ static void sig_hand(int signr)
 
 static struct sigaction sigact = {.sa_handler = sig_hand};
 
+static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
+{
+	if (level == LIBBPF_DEBUG && !env.verbose)
+		return 0;
+	return vfprintf(stderr, format, args);
+}
+
 int main(int argc, char **argv)
 {
 	static const struct argp argp = {
@@ -494,6 +506,7 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &sigact, 0);
 
 	libbpf_set_strict_mode(LIBBPF_STRICT_ALL);
+	libbpf_set_print(libbpf_print_fn);
 
 	ksyms = ksyms__load();
 	if (!ksyms) {
@@ -521,6 +534,41 @@ int main(int argc, char **argv)
 	obj->rodata->targ_pid = env.tid;
 	obj->rodata->targ_lock = lock_addr;
 
+	if (fentry_can_attach("mutex_lock_nested", NULL)) {
+		bpf_program__set_attach_target(obj->progs.mutex_lock, 0,
+					       "mutex_lock_nested");
+		bpf_program__set_attach_target(obj->progs.mutex_lock_exit, 0,
+					       "mutex_lock_nested");
+		bpf_program__set_attach_target(obj->progs.mutex_lock_interruptible, 0,
+					       "mutex_lock_interruptible_nested");
+		bpf_program__set_attach_target(obj->progs.mutex_lock_interruptible_exit, 0,
+					       "mutex_lock_interruptible_nested");
+		bpf_program__set_attach_target(obj->progs.mutex_lock_killable, 0,
+					       "mutex_lock_killable_nested");
+		bpf_program__set_attach_target(obj->progs.mutex_lock_killable_exit, 0,
+					       "mutex_lock_killable_nested");
+	}
+
+	if (fentry_can_attach("down_read_nested", NULL)) {
+		bpf_program__set_attach_target(obj->progs.down_read, 0,
+					       "down_read_nested");
+		bpf_program__set_attach_target(obj->progs.down_read_exit, 0,
+					       "down_read_nested");
+		bpf_program__set_attach_target(obj->progs.down_read_killable, 0,
+					       "down_read_killable_nested");
+		bpf_program__set_attach_target(obj->progs.down_read_killable_exit, 0,
+					       "down_read_killable_nested");
+
+		bpf_program__set_attach_target(obj->progs.down_write, 0,
+					       "down_write_nested");
+		bpf_program__set_attach_target(obj->progs.down_write_exit, 0,
+					       "down_write_nested");
+		bpf_program__set_attach_target(obj->progs.down_write_killable, 0,
+					       "down_write_killable_nested");
+		bpf_program__set_attach_target(obj->progs.down_write_killable_exit, 0,
+					       "down_write_killable_nested");
+	}
+
 	err = klockstat_bpf__load(obj);
 	if (err) {
 		warn("failed to load BPF object\n");
@@ -532,7 +580,7 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	printf("Tracing mutex lock events...  Hit Ctrl-C to end\n");
+	printf("Tracing mutex/sem lock events...  Hit Ctrl-C to end\n");
 
 	for (i = 0; i < env.iterations && !exiting; i++) {
 		sleep(env.interval);
@@ -552,7 +600,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	printf("Exiting trace of mutex locks\n");
+	printf("Exiting trace of mutex/sem locks\n");
 
 cleanup:
 	klockstat_bpf__destroy(obj);

@@ -296,6 +296,10 @@ static struct bpf_helper helpers[] = {
   {"xdp_load_bytes", "5.18"},
   {"xdp_store_bytes", "5.18"},
   {"copy_from_user_task", "5.18"},
+  {"skb_set_tstamp", "5.18"},
+  {"ima_file_hash", "5.18"},
+  {"kptr_xchg", "5.19"},
+  {"map_lookup_percpu_elem", "5.19"},
 };
 
 static uint64_t ptr_to_u64(void *ptr)
@@ -615,22 +619,17 @@ int bpf_prog_get_tag(int fd, unsigned long long *ptag)
 /*    fprintf(stderr, "failed to open fdinfo %s\n", strerror(errno));*/
     return -1;
   }
-  fgets(fmt, sizeof(fmt), f); // pos
-  fgets(fmt, sizeof(fmt), f); // flags
-  fgets(fmt, sizeof(fmt), f); // mnt_id
-  fgets(fmt, sizeof(fmt), f); // prog_type
-  fgets(fmt, sizeof(fmt), f); // prog_jited
-  fgets(fmt, sizeof(fmt), f); // prog_tag
-  fclose(f);
-  char *p = strchr(fmt, ':');
-  if (!p) {
-/*    fprintf(stderr, "broken fdinfo %s\n", fmt);*/
-    return -2;
-  }
   unsigned long long tag = 0;
-  sscanf(p + 1, "%llx", &tag);
-  *ptag = tag;
-  return 0;
+  // prog_tag: can appear in different lines
+  while (fgets(fmt, sizeof(fmt), f)) {
+    if (sscanf(fmt, "prog_tag:%llx", &tag) == 1) {
+      *ptag = tag;
+      fclose(f);
+      return 0;
+    }
+  }
+  fclose(f);
+  return -2;
 }
 
 static int libbpf_bpf_prog_load(const struct bpf_load_program_attr *load_attr,
@@ -1552,7 +1551,7 @@ int bpf_attach_xdp(const char *dev_name, int progfd, uint32_t flags) {
     return -1;
   }
 
-  ret = bpf_set_link_xdp_fd(ifindex, progfd, flags);
+  ret = bpf_xdp_attach(ifindex, progfd, flags, NULL);
   if (ret) {
     libbpf_strerror(ret, err_buf, sizeof(err_buf));
     fprintf(stderr, "bpf: Attaching prog to %s: %s\n", dev_name, err_buf);
