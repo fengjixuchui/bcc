@@ -11,7 +11,7 @@ CFLAGS := -g -O2 -Wall
 BPFCFLAGS := -g -O2 -Wall
 INSTALL ?= install
 prefix ?= /usr/local
-ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' | sed 's/ppc64le/powerpc/' | sed 's/mips.*/mips/')
+ARCH := $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' | sed 's/ppc64le/powerpc/' | sed 's/mips.*/mips/' | sed 's/riscv64/riscv/')
 BTFHUB_ARCHIVE ?= $(abspath btfhub-archive)
 
 ifeq ($(wildcard $(ARCH)/),)
@@ -52,11 +52,13 @@ APPS = \
 	runqlat \
 	runqlen \
 	runqslower \
+	sigsnoop \
 	slabratetop \
 	softirqs \
 	solisten \
 	statsnoop \
 	syscount \
+	tcptracer \
 	tcpconnect \
 	tcpconnlat \
 	tcplife \
@@ -70,7 +72,8 @@ export OUTPUT BPFTOOL ARCH BTFHUB_ARCHIVE APPS
 
 FSDIST_ALIASES = btrfsdist ext4dist nfsdist xfsdist
 FSSLOWER_ALIASES = btrfsslower ext4slower nfsslower xfsslower
-APP_ALIASES = $(FSDIST_ALIASES) $(FSSLOWER_ALIASES)
+SIGSNOOP_ALIAS = killsnoop
+APP_ALIASES = $(FSDIST_ALIASES) $(FSSLOWER_ALIASES) ${SIGSNOOP_ALIAS}
 
 COMMON_OBJ = \
 	$(OUTPUT)/trace_helpers.o \
@@ -167,6 +170,10 @@ $(FSSLOWER_ALIASES): fsslower
 	$(Q)ln -f -s $^ $@
 
 $(FSDIST_ALIASES): fsdist
+	$(call msg,SYMLINK,$@)
+	$(Q)ln -f -s $^ $@
+
+$(SIGSNOOP_ALIAS): sigsnoop
 	$(call msg,SYMLINK,$@)
 	$(Q)ln -f -s $^ $@
 
