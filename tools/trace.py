@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # trace         Trace a function and print a trace message based on its
 #               parameters, with an optional filter.
@@ -630,8 +630,8 @@ BPF_PERF_OUTPUT(%s);
                 event = ct.cast(data, ct.POINTER(self.python_struct)).contents
                 if self.name not in event.comm:
                     return
-                values = map(lambda i: getattr(event, "v%d" % i),
-                             range(0, len(self.values)))
+                values = list(map(lambda i: getattr(event, "v%d" % i),
+                             range(0, len(self.values))))
                 msg = self._format_message(bpf, event.tgid, values)
                 if self.msg_filter and self.msg_filter not in msg:
                     return
